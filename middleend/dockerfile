@@ -1,0 +1,36 @@
+# Stage 2: Set Up Flask Backend
+FROM python:3.8
+
+# Set environment variables
+ENV FLASK_APP=app.py
+
+ENV URL=https://backendflask-e64bz5ofya-uc.a.run.app
+
+COPY ./vocal-antler-405123-20127493c651.json /app/middleend/vocal-antler-405123-20127493c651.json
+   
+
+
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/middleend/vocal-antler-405123-20127493c651.json
+    
+
+ENV BASE_IMAGE_PATH = https://storage.googleapis.com/lstm-middleend-bucket/
+
+ENV BUCKET_NAME = lstm-middleend-bucket
+
+ENV FLASK_RUN_HOST=0.0.0.0 
+# Flask listens on port 80
+ENV FLASK_RUN_PORT=8080
+# Open the port Flask is running on
+EXPOSE 8080
+
+RUN apt-get update -y && \
+    apt-get install -y python3-pip
+
+COPY ./requirements.txt /app/requirements.txt
+
+WORKDIR /app
+
+RUN pip install -r requirements.txt
+
+COPY ./ /app
+CMD ["flask", "run"]

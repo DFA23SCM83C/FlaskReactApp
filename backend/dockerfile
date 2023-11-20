@@ -3,7 +3,7 @@ FROM python:3.8
 
 # Set environment variables
 ENV FLASK_APP=app.py
-
+ENV GITHUB_TOKEN = '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'
 ENV FLASK_RUN_HOST=0.0.0.0
 # Flask listens on port 80
 ENV FLASK_RUN_PORT=30000

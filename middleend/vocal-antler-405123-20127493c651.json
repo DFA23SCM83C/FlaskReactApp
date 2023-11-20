@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "vocal-antler-405123",
+  "private_key_id": "20127493c651c6314b595c89ec94bab16e52e56d",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCtY3jlMO+DIP8B\nzW9SPLFF6FpT95uiC4+FdX8a1DVWkV9BXu9K9e9wT6KxHpYLr6LUVtnwYVZzgcLu\nP7PC6ZbNSR886kfzr6kaU4RsSzsh8RT7ZcMM425pWs89q4Q9I3+jA8F6dOrbUkpO\n9VqZBuQmbxkVGYSj0sV2fBcyNDRco9+22zxsPPIj0FciIbrHSk7iPSmCBtF/3PVd\nzBEQnopV2GW0SyqHj/fuBMc1PS6nJsYrV2Xapnqyl7Vyfsh0aq32VqHQAFuLG7WV\nFa+woybl86cVH+ESpsK66QGm5J4espfH2RA3lLlwxYtaADGph4GgIBejmsp5Q3Dg\nwK03nBKLAgMBAAECggEAIvFKgmnfwv3p1lun5RtdIHkIhyZ942TQCjXZJTeB/k2y\ntDJlKCazF9+8qlQ/KeC+AGv2ZObA7OtINQp6eDvqC7oCRRzz3izW9/q/07E/nAIB\nV/60lcrZy/qkjEmeD1IxnVEa80pPsF5/ojT5CqDkZsh59hIb9IX8DHpKlHAH42lA\nFdWyttPBwwgCt5X7fxXoHqaUGNNtQ9p474ciRN0gnCxrUO285lE0Voijg5w0/WiG\nNZUJrbPW/dSXjFLXMvcjlrWP7ssDmU4KzbPUaNDJSeVUdJg1vo9VxFhzs16Xxlep\npYbD3ZMQ1NccKjXv4O70nsZEb2KG9z5IntqsBw63jQKBgQDe1QfphWCZboKMSxxK\n3btwft7EaFnUIDa2u0UZaoOZ8f31JrH/q6TENmTygS9GqyZxu+0y77RRDVYIKAFT\ndxWSjY1MDYNDbmIoEajlkSAsXSdUAXvrX9tEdbElkIIT62glqKogT+hvYqz/lP4h\nRxcwrsoPBRo+suNFHOdGCKa1pwKBgQDHMmeNxuYapfAIRbGiK8Mo7JEidrGmSlfL\n3lns5qv45ywKv0uKyLpGyRRA5N2t9ZhPH0ps271cHYkiafhYJFCNEGW7qxM6C6fJ\nRqC5UzFCGi/quHNF4V7a9L7oy+GGN+ozOHXcgXpU5FYlEpYUehHaOj9DrQy8ZEiV\nprr73YugfQKBgAHIGkQXuOoBJDIS96rxkuoXWZigbPdxOn7DiI3neB3m/WzUXl/4\n81xOQwhdWA9sluYZ5o+dswdi3+k4yKnuLdH6J8MP6JjFbSt82KjdPDCeng3h5SfA\noHQvrLbsLN4T58VFT/bqLKWXWGLCwjVp6BmPjDYKiGcv7vlCfeblcs/JAoGBALrD\n+LHGpmKf6PFonwdFbuNFA0ND9IbMt4rPfJMRKHbkELg26dZDI9xQlivOKkb7uYWd\n+gMc+GuQyc45e37w9ZF9qVUPLqTC3ttp3DJG3S10Li8uJ+6CQ5SZ2xGcb2SPsoe5\nzVAlGhTUTizOQ2cJmQl6iWyjqQhOInwl6rVR4KNlAoGAIdT2RGTD/kZ19K7IoE3n\n/NPPjstC92ulJZ090D5ek3kcfsAU4ad9wdGRFoBvuRI+TN4NEtA29cPGC0Dr/qSl\ny0zfuIDIjAU64b9W2SnTBq5YtiBIf2ZnBCUGKAkxM3SEoO3nY3ffTqVhGu77c3uc\n/uaxFNC+3LA08nE3dTkiM/o=\n-----END PRIVATE KEY-----\n",
+  "client_email": "lstm-service-account@vocal-antler-405123.iam.gserviceaccount.com",
+  "client_id": "117459072008044402533",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/lstm-service-account%40vocal-antler-405123.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

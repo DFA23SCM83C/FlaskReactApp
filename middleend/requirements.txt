@@ -1,0 +1,14 @@
+numpy
+matplotlib
+pandas
+scikit-learn
+tensorflow
+prophet
+statsmodels
+keras
+cors
+Flask
+flask-cors
+requests
+datetime
+google-cloud-storage
