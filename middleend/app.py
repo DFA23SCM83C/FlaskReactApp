@@ -14,6 +14,7 @@ import requests
 import json
 from google.cloud import storage
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 
 app = Flask(__name__)
 import os
@@ -435,3 +436,442 @@ def get_forecast_issues_month():
     predicted_max_month = np.argmax(np.sum(forecast_closed, axis=0)) + 1  # Adding 1 as months are 1-indexed
 
     return str(predicted_max_month)
+
+
+@app.route('/api/lstm/plot/issues/created', methods=['GET'])
+def get_forecast_plot_issues_created():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    data = response_API.text
+    dataissues = json.loads(data)
+    # Convert to DataFrame and process dates
+    dfissues = pd.DataFrame(dataissues[repo])
+    dfissues['created_at'] = pd.to_datetime(dfissues['created_at'])
+    dfissues.set_index('created_at', inplace=True)
+
+    # Resample and count issues per day
+    daily_issue_count = dfissues.resample('D').size()
+
+    # Convert Series to DataFrame for consistent handling
+    daily_issue_count_df = daily_issue_count.to_frame(name='count')
+
+    # Prepare data for LSTM
+    Xissues, yissues = [], []
+    n_past = 7  # Number of past days to consider
+    n_future = 1  # Predicting the next day
+
+    for i in range(n_past, len(daily_issue_count_df) - n_future + 1):
+        Xissues.append(daily_issue_count_df.iloc[i - n_past:i, 0])
+        yissues.append(daily_issue_count_df.iloc[i, 0])
+
+    Xissues, yissues = np.array(Xissues), np.array(yissues)
+    Xissues = Xissues.reshape((Xissues.shape[0], n_past, 1))  # Reshaping for LSTM
+
+    # Build the LSTM model
+    model = Sequential()
+    model.add(LSTM(50, activation='relu', input_shape=(n_past, 1)))
+    model.add(Dense(n_future))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model.fit(Xissues, yissues, epochs=100, batch_size=32)
+    n_future_days = 30  # Number of days to forecast
+    last_known_date = daily_issue_count_df.index[-1]
+    future_dates = [last_known_date + timedelta(days=x) for x in range(1, n_future_days + 1)]
+
+    # Use the last n_past days from your data for the initial forecast
+    last_known_data = np.array(daily_issue_count_df[-n_past:]).reshape(1, n_past, 1)
+
+    # Iteratively predict each future day
+    future_forecast = []
+    for i in range(n_future_days):
+        next_day_prediction = model.predict(last_known_data)
+        future_forecast.append(next_day_prediction.flatten()[0])
+        # Update last_known_data with the new prediction
+        last_known_data = np.roll(last_known_data, -1, axis=1)
+        last_known_data[0, -1, 0] = next_day_prediction
+
+    # Plotting
+    plt.figure(figsize=(15, 7))
+    plt.plot(daily_issue_count_df.index, daily_issue_count_df['count'], label='Actual Issue Count')
+    plt.plot(future_dates, future_forecast, label='Forecasted Issue Count', color='orange')
+    plt.title('Forecast of Issue Creation')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Issues')
+    plt.xticks(rotation=45)
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_issues_created_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/lstm/plot/issues/closed', methods=['GET'])
+def get_forecast_plot_issues_closed():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = response_API.text
+    dataclosed = json.loads(data)
+    dfclosed = pd.DataFrame(dataclosed[repo])
+    dfclosed['closed_at'] = pd.to_datetime(dfclosed['closed_at'])
+    dfclosed.set_index('closed_at', inplace=True)
+
+    # Resample and count closed issues per day
+    daily_closed_count = dfclosed.resample('D').size()
+
+    # Convert Series to DataFrame for consistent handling
+    daily_closed_count_df = daily_closed_count.to_frame(name='count')
+    # Prepare data for LSTM
+    Xclosed, yclosed = [], []
+    n_past = 7  # Number of past days to consider
+    n_future = 1  # Predicting the next day
+
+    for i in range(n_past, len(daily_closed_count_df) - n_future + 1):
+        Xclosed.append(daily_closed_count_df.iloc[i - n_past:i, 0])
+        yclosed.append(daily_closed_count_df.iloc[i, 0])
+
+    Xclosed, yclosed = np.array(Xclosed), np.array(yclosed)
+    Xclosed = Xclosed.reshape((Xclosed.shape[0], n_past, 1))  # Reshaping for LSTM
+
+    # Build the LSTM model
+    closed_model = Sequential()
+    closed_model.add(LSTM(50, activation='relu', input_shape=(n_past, 1)))
+    closed_model.add(Dense(n_future))
+    closed_model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    closed_model.fit(Xclosed, yclosed, epochs=100, batch_size=32)
+
+    # Forecast
+    n_future_days = 30  # Number of days to forecast for closed issues
+    last_known_date_closed = daily_closed_count_df.index[-1]
+    future_dates_closed = [last_known_date_closed + timedelta(days=x) for x in range(1, n_future_days + 1)]
+
+    last_known_data_closed = np.array(daily_closed_count_df[-n_past:]).reshape(1, n_past, 1)
+
+    future_forecast_closed = []
+    for i in range(n_future_days):
+        next_day_prediction_closed = closed_model.predict(last_known_data_closed)
+        future_forecast_closed.append(next_day_prediction_closed.flatten()[0])
+        last_known_data_closed = np.roll(last_known_data_closed, -1, axis=1)
+        last_known_data_closed[0, -1, 0] = next_day_prediction_closed
+    plt.figure(figsize=(15, 7))
+    plt.plot(daily_closed_count_df.index, daily_closed_count_df['count'], label='Actual Closed Issue Count')
+    plt.plot(future_dates_closed, future_forecast_closed, label='Forecasted Closed Issue Count', color='orange')
+    plt.title('Forecast of Issue Closure')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Closed Issues')
+    plt.xticks(rotation=45)
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_issues_closed_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/lstm/plot/commits', methods=['GET'])
+def get_forecast_plot_commits():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/commits?repo=' + repo)
+    data = response_API.text
+    datacommit = json.loads(data)
+
+    df = pd.DataFrame()
+    for repo, commits in datacommit.items():
+        temp_df = pd.DataFrame(commits)
+
+        # Check if 'date' key is in the DataFrame columns
+        if 'date' in temp_df.columns:
+            temp_df['date'] = pd.to_datetime(temp_df['date'])
+            df = pd.concat([df, temp_df])
+        else:
+            print(f"'date' key not found in the commits for repository {repo}")
+
+    # Group by date and count the number of commits
+    df = df.groupby('date')['sha'].count().reset_index(name='count')
+
+    # Resample to ensure all days are represented
+    df.set_index('date', inplace=True)
+    df = df.resample('D').asfreq().fillna(0)
+
+    # Prepare data for LSTM
+    n_past = 7
+    n_future = 1
+    X, y = [], []
+    for i in range(n_past, len(df) - n_future + 1):
+        X.append(df.iloc[i - n_past:i, 0])
+        y.append(df.iloc[i, 0])
+
+    X, y = np.array(X), np.array(y)
+    X = X.reshape((X.shape[0], n_past, 1))
+
+    # Build the LSTM model
+    model = Sequential()
+    model.add(LSTM(50, activation='relu', input_shape=(n_past, 1)))
+    model.add(Dense(n_future))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model.fit(X, y, epochs=100, batch_size=32)
+
+    # Forecast future commits
+    n_future_days = 30
+    last_known_data = X[-1:]
+    future_forecast = []
+
+    for _ in range(n_future_days):
+        next_day_prediction = model.predict(last_known_data)
+        future_forecast.append(next_day_prediction.flatten()[0])
+        last_known_data = np.roll(last_known_data, -1, axis=1)
+        last_known_data[0, -1, 0] = next_day_prediction
+
+    # Create dates for the forecast
+    last_date = df.index[-1]
+    future_dates = [last_date + timedelta(days=i) for i in range(1, n_future_days + 1)]
+
+    # Plotting
+    plt.figure(figsize=(15, 7))
+    plt.plot(df.index, df['count'], label='Actual Commit Count')
+    plt.plot(future_dates, future_forecast, label='Forecasted Commit Count', color='orange')
+    plt.title('Forecast of Commit Activity')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Commits')
+    plt.xticks(rotation=45)
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_commits_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/lstm/plot/pull', methods=['GET'])
+def get_forecast_plot_pull():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/pull?repo=' + repo)
+    data = response_API.text
+    datapull = json.loads(data)
+    # Convert data into DataFrame
+    df = pd.DataFrame(datapull[repo])
+
+    # Convert 'created_at' to datetime and count PRs per day
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df = df.groupby('created_at').count().reset_index()
+
+    # Resample to ensure all days are represented
+    df.set_index('created_at', inplace=True)
+    df = df.resample('D').asfreq().fillna(0)
+
+    # Prepare data for LSTM
+    n_past = 7
+    n_future = 1
+    X, y = [], []
+    for i in range(n_past, len(df) - n_future + 1):
+        X.append(df.iloc[i - n_past:i, 0])
+        y.append(df.iloc[i, 0])
+
+    X, y = np.array(X), np.array(y)
+    X = X.reshape((X.shape[0], n_past, 1))
+
+    # Build the LSTM model
+    model = Sequential()
+    model.add(LSTM(50, activation='relu', input_shape=(n_past, 1)))
+    model.add(Dense(n_future))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model.fit(X, y, epochs=100, batch_size=32)
+
+    # Forecast future PRs
+    n_future_days = 30
+    last_known_data = X[-1:]
+    future_forecast = []
+
+    for _ in range(n_future_days):
+        next_day_prediction = model.predict(last_known_data)
+        future_forecast.append(next_day_prediction.flatten()[0])
+        last_known_data = np.roll(last_known_data, -1, axis=1)
+        last_known_data[0, -1, 0] = next_day_prediction
+
+    # Create dates for the forecast
+    last_date = df.index[-1]
+    future_dates = [last_date + timedelta(days=i) for i in range(1, n_future_days + 1)]
+
+    # Plotting
+    plt.figure(figsize=(15, 7))
+    plt.plot(df.index, df['pr_number'], label='Actual Pull Count')
+    plt.plot(future_dates, future_forecast, label='Forecasted Pull Count', color='orange')
+    plt.title('Forecast of Pull Activity')
+    plt.xlabel('Date')
+    plt.ylabel('Number of pulls')
+    plt.xticks(rotation=45)
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_pull_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+    @app.route('/api/lstm/plot/contributor', methods=['GET'])
+def get_forecast_plot_contributor():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/contributors?repo=' + repo)
+    data = response_API.text
+    datacontributors = json.loads(data)
+    # Step 1: Preprocess the Data
+    dates = []
+    for repo, contributors in datacontributors.items():
+        for contributor in contributors:
+            dates.extend(contributor['dates'])
+
+    # Convert to DataFrame
+    df = pd.DataFrame({'date': dates})
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.groupby('date').size().reset_index(name='contributions')
+
+    # Ensure continuous dates and fill missing values
+    df = df.set_index('date').asfreq('D').fillna(0)
+
+    # Normalize the data
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(df.values)
+
+    # Step 2: Prepare Training Data
+    def create_dataset(dataset, look_back=1):
+        X, Y = [], []
+        for i in range(len(dataset) - look_back - 1):
+            a = dataset[i:(i + look_back), 0]
+            X.append(a)
+            Y.append(dataset[i + look_back, 0])
+        return np.array(X), np.array(Y)
+
+    look_back = 5
+    X, Y = create_dataset(scaled_data, look_back)
+
+    # Reshape input to be [samples, time steps, features]
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+
+    # Step 3: Build and Train LSTM Model
+    model = Sequential()
+    model.add(LSTM(50, input_shape=(look_back, 1)))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, Y, epochs=100, batch_size=1, verbose=2)
+
+    # Step 4: Forecast Future Contributions
+    predictions = []
+    current_batch = X[-1:]
+
+    for i in range(30):  # Forecast next 30 days
+        current_pred = model.predict(current_batch)[0]
+        predictions.append(current_pred)
+        current_batch = np.append(current_batch[:, 1:, :], [[current_pred]], axis=1)
+
+    predicted_contributions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+
+    # Convert predictions to a suitable format for plotting
+    future_dates = pd.date_range(start=df.index[-1], periods=30)
+    future_df = pd.DataFrame(data=predicted_contributions, index=future_dates, columns=['Predictions'])
+
+    # Plotting
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['contributions'], label='Actual Contributions')
+    plt.plot(future_df.index, future_df['Predictions'], label='Predicted Contributions', color='orange')
+    plt.title('Contributions Forecast Using LSTM')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Contributions')
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_contributor_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+@app.route('/api/lstm/plot/release', methods=['GET'])
+def get_forecast_plot_release():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/release?repo=' + repo)
+    data = response_API.text
+    datarelease = json.loads(data)
+    # Extract release dates
+    release_dates = [entry['release_date'] for entry in datarelease[repo]]
+
+    # Convert to DataFrame
+    df = pd.DataFrame({'release_date': release_dates})
+    df['release_date'] = pd.to_datetime(df['release_date'])
+    df = df.groupby('release_date').size().reset_index(name='releases')
+
+    # Resample to daily frequency, filling days without releases with 0
+    df = df.set_index('release_date').asfreq('D').fillna(0)
+
+    # Normalize the data
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(df.values)
+
+    def create_dataset(dataset, look_back=1):
+        X, Y = [], []
+        for i in range(len(dataset) - look_back - 1):
+            a = dataset[i:(i + look_back), 0]
+            X.append(a)
+            Y.append(dataset[i + look_back, 0])
+        return np.array(X), np.array(Y)
+
+    look_back = 5
+    X, Y = create_dataset(scaled_data, look_back)
+
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+    model = Sequential()
+    model.add(LSTM(50, input_shape=(look_back, 1)))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, Y, epochs=100, batch_size=1, verbose=2)
+    predictions = []
+    current_batch = X[-1:]
+
+    for i in range(30):  # Forecast next 30 days
+        current_pred = model.predict(current_batch)[0]
+        predictions.append(current_pred)
+        current_batch = np.append(current_batch[:, 1:, :], [[current_pred]], axis=1)
+
+    predicted_releases = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    future_df = pd.DataFrame(data=predicted_releases, index=future_dates, columns=['Predictions'])
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['releases'], label='Actual Releases')
+    plt.plot(future_df.index, future_df['Predictions'], label='Predicted Releases', color='orange')
+    plt.title('Release Forecast Using LSTM')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Releases')
+    plt.legend()
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'lstm_release_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+
+
