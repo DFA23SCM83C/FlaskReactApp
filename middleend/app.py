@@ -291,3 +291,147 @@ def get_data_stars():
     return bucketurl + filename
 
 
+@app.route('/api/lstm/issues/open', methods=['GET'])
+def get_forecast_issues_open():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    data = response_API.text
+    data = json.loads(data)
+    df = pd.DataFrame(data[repo])
+
+    # Convert 'created_at' to datetime and extract the day of the week
+    df['created_at'] = pd.to_datetime(df['created_at']).dt.date
+    df['day_of_week'] = pd.to_datetime(df['created_at']).dt.dayofweek
+
+    # Aggregate data by day of the week
+    agg_data = df.groupby('day_of_week').size().reset_index(name='issue_count')
+    # Convert to numpy array
+    data = agg_data['issue_count'].values
+
+    # Prepare data for LSTM
+    # Since we're dealing with days of the week, let's use the last few weeks to predict the next week
+    X, y = [], []
+    n_past = 4  # Number of past weeks to consider
+    n_future = 1  # Predicting the next week
+
+    for i in range(n_past, len(data) - n_future + 1):
+        X.append(data[i - n_past:i])
+        y.append(data[i:i + n_future])
+
+    X, y = np.array(X), np.array(y)
+    X = X.reshape((X.shape[0], X.shape[1], 1))  # Reshaping for LSTM
+    # Build the LSTM model
+    model = Sequential()
+    model.add(LSTM(units=50, activation='relu', input_shape=(n_past, 1)))
+    model.add(Dense(units=n_future))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model.fit(X, y, epochs=100, batch_size=32)
+    # Forecast
+    forecast = model.predict(X)
+
+    # Find the day with the maximum number of predicted issues
+    predicted_max_day = np.argmax(np.sum(forecast, axis=0))
+
+    # Convert day index to day name
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+
+@app.route('/api/lstm/issues/closed', methods=['GET'])
+def get_forecast_issues_closed():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = response_API.text
+    dataclosed = json.loads(data)
+    # Convert to DataFrame
+    dfclosed = pd.DataFrame(dataclosed[repo])
+
+    # Convert 'created_at' to datetime and extract the day of the week
+    dfclosed['closed_at'] = pd.to_datetime(dfclosed['closed_at']).dt.date
+    dfclosed['day_of_week'] = pd.to_datetime(dfclosed['closed_at']).dt.dayofweek
+
+    # Aggregate data by day of the week
+    agg_dataclosed = dfclosed.groupby('day_of_week').size().reset_index(name='issue_count')
+    closeddata = agg_dataclosed['issue_count'].values
+
+    # Data preparation for LSTM
+    Xclosed, yclosed = [], []
+    n_past = 4  # Using 4 weeks of data to predict
+    n_future = 1  # Predicting one week ahead
+
+    for i in range(n_past, len(closeddata) - n_future + 1):
+        Xclosed.append(closeddata[i - n_past:i])
+        yclosed.append(closeddata[i:i + n_future])
+
+    Xclosed, yclosed = np.array(Xclosed), np.array(yclosed)
+    Xclosed = Xclosed.reshape((Xclosed.shape[0], Xclosed.shape[1], 1))  # Reshaping for LSTM
+
+    # Model building
+    model = Sequential()
+    model.add(LSTM(units=50, activation='relu', input_shape=(n_past, 1)))
+    model.add(Dense(units=n_future))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Model training
+    model.fit(Xclosed, yclosed, epochs=100, batch_size=32)
+
+    # Forecasting
+    forecast = model.predict(Xclosed)
+
+    # Find the day with the maximum number of predicted issues
+    predicted_max_day = np.argmax(np.sum(forecast, axis=0))
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+
+@app.route('/api/lstm/issues/month', methods=['GET'])
+def get_forecast_issues_month():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = response_API.text
+    dataclosed = json.loads(data)
+    # Convert to DataFrame
+    df_closed = pd.DataFrame(dataclosed[repo])
+    # Convert 'closed_at' to datetime and extract the month
+    # Convert to DataFrame
+    # Convert 'closed_at' to datetime and extract the month
+    df_closed['closed_at'] = pd.to_datetime(df_closed['closed_at'])
+    df_closed['month'] = df_closed['closed_at'].dt.month
+
+    # Count issues per month
+    monthly_issue_count = df_closed.groupby('month').size()
+
+    # Resample to ensure all months are represented (including months with zero issues)
+    monthly_issue_count = monthly_issue_count.reindex(range(1, 13), fill_value=0)
+    # Prepare data for LSTM
+    X_closed, y_closed = [], []
+    n_past_months = 6  # Number of past months to consider
+    n_future_months = 1  # Predicting the next month
+
+    for i in range(n_past_months, len(monthly_issue_count) - n_future_months + 1):
+        X_closed.append(monthly_issue_count[i - n_past_months:i])
+        y_closed.append(monthly_issue_count[i:i + n_future_months])
+
+    X_closed, y_closed = np.array(X_closed), np.array(y_closed)
+    X_closed = X_closed.reshape((X_closed.shape[0], X_closed.shape[1], 1))  # Reshaping for LSTM
+    # Build the LSTM model
+    model_closed = Sequential()
+    model_closed.add(LSTM(units=50, activation='relu', input_shape=(n_past_months, 1)))
+    model_closed.add(Dense(units=n_future_months))
+    model_closed.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model_closed.fit(X_closed, y_closed, epochs=100, batch_size=32)
+    # Forecast
+    forecast_closed = model_closed.predict(X_closed)
+
+    # Find the month with the maximum number of predicted closed issues
+    predicted_max_month = np.argmax(np.sum(forecast_closed, axis=0)) + 1  # Adding 1 as months are 1-indexed
+
+    return str(predicted_max_month)
