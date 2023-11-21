@@ -12,3 +12,4 @@ flask-cors
 requests
 datetime
 google-cloud-storage
+plotly

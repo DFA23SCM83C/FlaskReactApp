@@ -15,7 +15,7 @@ import json
 from google.cloud import storage
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-
+from prophet import Prophet
 app = Flask(__name__)
 import os
 from tensorflow.keras.models import Sequential
@@ -726,7 +726,7 @@ def get_forecast_plot_pull():
 
     return bucketurl + filename
 
-    @app.route('/api/lstm/plot/contributor', methods=['GET'])
+@app.route('/api/lstm/plot/contributor', methods=['GET'])
 def get_forecast_plot_contributor():
     repo = request.args.get('repo')
     response_API = requests.get(appurl + '/api/date/contributors?repo=' + repo)
@@ -874,4 +874,351 @@ def get_forecast_plot_release():
 
 
 
+@app.route('/api/prophet/issues/created', methods=['GET'])
+def get_forecast_prohphet_issues_created():
+    repo = request.args.get('repo')
+    appurl = 'https://backendflask-e64bz5ofya-uc.a.run.app'
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    data = response_API.text
+    data = json.loads(data)
+    df = pd.DataFrame(data[repo])
 
+    # Convert 'created_at' to datetime
+    df['ds'] = pd.to_datetime(df['created_at']).dt.date
+
+    # Aggregate data by day
+    df = df.groupby('ds').size().reset_index(name='y')
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+
+    # Create a future DataFrame for prediction
+    future = model.make_future_dataframe(periods=30)  # Predicting the next 30 days
+
+    # Make predictions
+    forecast = model.predict(future)
+
+    # Aggregate predictions by day of the week
+    forecast['day_of_week'] = forecast['ds'].dt.dayofweek
+    weekly_forecast = forecast.groupby('day_of_week')['yhat'].sum().reset_index()
+
+    # Find the day with the maximum predicted issues
+    predicted_max_day = weekly_forecast['day_of_week'][weekly_forecast['yhat'].idxmax()]
+
+    # Convert day index to day name
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+
+@app.route('/api/prophet/issues/closed', methods=['GET'])
+def get_forecast_prohphet_issues_closed():
+    repo = request.args.get('repo')
+    appurl = 'https://backendflask-e64bz5ofya-uc.a.run.app'
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = response_API.text
+    data = json.loads(data)
+    df = pd.DataFrame(data[repo])
+
+    # Convert 'created_at' to datetime
+    df['ds'] = pd.to_datetime(df['closed_at']).dt.date
+
+    # Aggregate data by day
+    df = df.groupby('ds').size().reset_index(name='y')
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+
+    # Create a future DataFrame for prediction
+    future = model.make_future_dataframe(periods=30)  # Predicting the next 30 days
+
+    # Make predictions
+    forecast = model.predict(future)
+
+    # Aggregate predictions by day of the week
+    forecast['day_of_week'] = forecast['ds'].dt.dayofweek
+    weekly_forecast = forecast.groupby('day_of_week')['yhat'].sum().reset_index()
+
+    # Find the day with the maximum predicted issues
+    predicted_max_day = weekly_forecast['day_of_week'][weekly_forecast['yhat'].idxmax()]
+
+    # Convert day index to day name
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+
+@app.route('/api/prophet/issues/month', methods=['GET'])
+def get_forecast_prohphet_issues_month():
+    repo =request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = response_API.text
+    dataclosed = json.loads(data)
+    df_closed = pd.DataFrame(dataclosed[repo])
+
+    # Convert 'closed_at' to datetime and extract the month
+    df_closed['closed_at'] = pd.to_datetime(df_closed['closed_at'])
+    df_closed['month'] = df_closed['closed_at'].dt.to_period('M')
+
+    # Count issues per month and reset index
+    monthly_issue_count = df_closed.groupby('month').size().reset_index(name='y')
+    monthly_issue_count['ds'] = monthly_issue_count['month'].dt.to_timestamp()
+
+    # Instantiate and fit the Prophet model
+    model = Prophet(yearly_seasonality=True)
+    model.fit(monthly_issue_count[['ds', 'y']])
+
+    # Create future DataFrame for the next 12 months
+    future = model.make_future_dataframe(periods=1, freq='M')
+
+    # Make predictions
+    forecast = model.predict(future)
+
+    # Aggregate predictions by month
+    forecast['month'] = forecast['ds'].dt.to_period('M')
+    monthly_forecast = forecast.groupby('month')['yhat'].sum().reset_index()
+
+    # Find the month with the maximum predicted issues
+    predicted_max_month = monthly_forecast['month'][monthly_forecast['yhat'].idxmax()]
+
+    return str(predicted_max_month)
+
+
+@app.route('/api/prophet/plot/issues/created', methods=['GET'])
+def get_forecast_plot_issues_created_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    dataissues = json.loads(response_API.text)
+
+    # Convert to DataFrame and process dates
+    df_issues = pd.DataFrame(dataissues[repo])
+    df_issues['created_at'] = pd.to_datetime(df_issues['created_at']).dt.date
+
+    # Prepare data for Prophet
+    df_prophet = df_issues.groupby('created_at').size().reset_index(name='y')
+    df_prophet.columns = ['ds', 'y']
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df_prophet)
+
+    # Create future DataFrame for next 30 days
+    future = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future)
+
+    # Plotting
+    fig = model.plot(forecast)
+    plt.title(f'Forecast of Issue Creation for {repo}')
+    plt.ylabel('Number of Issues')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_issues_created_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+@app.route('/api/prophet/plot/issues/closed', methods=['GET'])
+def get_forecast_plot_issues_closed_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    dataclosed = json.loads(response_API.text)
+    df_closed = pd.DataFrame(dataclosed[repo])
+
+    # Prepare data for Prophet
+    df_closed['closed_at'] = pd.to_datetime(df_closed['closed_at']).dt.date
+    df_prophet = df_closed.groupby('closed_at').size().reset_index(name='y')
+    df_prophet.columns = ['ds', 'y']
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df_prophet)
+
+    # Create future DataFrame for next 30 days
+    future = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future)
+
+    # Plotting
+    fig = model.plot(forecast)
+    plt.title(f'Forecast of Issue Closure for {repo}')
+    plt.ylabel('Number of Closed Issues')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_issues_closed_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/prophet/plot/commits', methods=['GET'])
+def get_forecast_plot_commits_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/commits?repo=' + repo)
+    datacommit = json.loads(response_API.text)
+
+    df = pd.DataFrame()
+    for repo, commits in datacommit.items():
+        temp_df = pd.DataFrame(commits)
+        if 'date' in temp_df.columns:
+            temp_df['date'] = pd.to_datetime(temp_df['date'])
+            df = pd.concat([df, temp_df])
+        else:
+            continue
+
+    # Prepare data for Prophet
+    df = df.groupby('date').size().reset_index(name='y')
+    df.columns = ['ds', 'y']
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+
+    # Create future DataFrame for next 30 days
+    future = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future)
+
+    # Plotting
+    fig = model.plot(forecast)
+    plt.title(f'Forecast of Commit Activity for {repo}')
+    plt.ylabel('Number of Commits')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_commits_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/prophet/plot/pull', methods=['GET'])
+def get_forecast_plot_pull_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/pull?repo=' + repo)
+    datapull = json.loads(response_API.text)
+
+    # Convert data into DataFrame
+    df = pd.DataFrame(datapull[repo])
+
+    # Prepare data for Prophet
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df = df.groupby('created_at').size().reset_index(name='y')
+    df.columns = ['ds', 'y']
+
+    # Initialize and fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+
+    # Create future DataFrame for next 30 days
+    future = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future)
+
+    # Plotting
+    fig = model.plot(forecast)
+    plt.title(f'Forecast of Pull Request Activity for {repo}')
+    plt.ylabel('Number of Pull Requests')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_pull_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/prophet/plot/contributor', methods=['GET'])
+def get_forecast_plot_contributor_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/contributors?repo=' + repo)
+    datacontributors = json.loads(response_API.text)
+
+    # Step 1: Preprocess the Data
+    dates = []
+    for contributors in datacontributors.values():
+        for contributor in contributors:
+            dates.extend(contributor['dates'])
+
+    # Convert to DataFrame
+    df = pd.DataFrame({'ds': dates})
+    df['ds'] = pd.to_datetime(df['ds'])
+    df = df.groupby('ds').size().reset_index(name='y')
+
+    # Create and fit the Prophet model
+    model = Prophet()
+    model.fit(df)
+
+    # Step 2: Make Future Predictions
+    future_dates = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future_dates)
+
+    # Step 3: Plot the Forecast
+    fig = model.plot(forecast)
+    plt.title('Contributions Forecast Using Prophet')
+    plt.ylabel('Number of Contributions')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_contributor_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+@app.route('/api/prophet/plot/release', methods=['GET'])
+def get_forecast_plot_release_prophet():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/release?repo=' + repo)
+    datarelease = json.loads(response_API.text)
+
+    # Prepare the Data
+    release_dates = [entry['release_date'] for entry in datarelease[repo]]
+    df = pd.DataFrame({'ds': release_dates})
+    df['ds'] = pd.to_datetime(df['ds'])
+    df = df.groupby('ds').size().reset_index(name='y')
+
+    # Create and Fit the Prophet Model
+    model = Prophet()
+    model.fit(df)
+
+    # Make Future Predictions
+    future_dates = model.make_future_dataframe(periods=30)
+    forecast = model.predict(future_dates)
+
+    # Plot the Forecast
+    fig = model.plot(forecast)
+    plt.title('Release Forecast Using Prophet')
+    plt.ylabel('Number of Releases')
+    plt.xlabel('Date')
+
+    # Save plot to memory
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'prophet_release_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
