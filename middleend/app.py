@@ -20,7 +20,10 @@ app = Flask(__name__)
 import os
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.api import SimpleExpSmoothing
 CORS(app)
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
@@ -1218,6 +1221,353 @@ def get_forecast_plot_release_prophet():
     plt.savefig(buf, format='png')
     buf.seek(0)
     filename = 'prophet_release_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/issues/open', methods=['GET'])
+def get_forecast_issues_open_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    data = json.loads(response_API.text)
+    df = pd.DataFrame(data[repo])
+
+    # Convert 'created_at' to datetime and extract the day of the week
+    df['created_at'] = pd.to_datetime(df['created_at']).dt.date
+    df['day_of_week'] = pd.to_datetime(df['created_at']).dt.dayofweek
+
+    # Aggregate data by day of the week
+    agg_data = df.groupby('day_of_week').size().reset_index(name='issue_count')
+
+    # Create and Fit the ARIMA Model
+    model = ARIMA(agg_data['issue_count'], order=(1, 0, 1))  # Adjust ARIMA parameters as needed
+    model_fit = model.fit()
+
+    # Forecast
+    forecast = model_fit.forecast(steps=7)  # Forecast the next week
+
+    # Find the day with the maximum number of predicted issues
+    predicted_max_day = np.argmax(forecast)
+
+    # Convert day index to day name
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+
+@app.route('/api/statsmodel/issues/closed', methods=['GET'])
+def get_forecast_issues_closed_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = json.loads(response_API.text)
+    df_closed = pd.DataFrame(data[repo])
+
+    # Convert 'closed_at' to datetime and extract the day of the week
+    df_closed['closed_at'] = pd.to_datetime(df_closed['closed_at']).dt.date
+    df_closed['day_of_week'] = pd.to_datetime(df_closed['closed_at']).dt.dayofweek
+
+    # Aggregate data by day of the week
+    agg_data = df_closed.groupby('day_of_week').size().reset_index(name='issue_count')
+
+    # Create and Fit the ARIMA Model
+    model = ARIMA(agg_data['issue_count'], order=(1, 1, 1))  # Adjust parameters as needed
+    model_fit = model.fit()
+
+    # Forecast the next week
+    forecast = model_fit.forecast(steps=7)  # Forecasting 7 days
+
+    # Find the day with the maximum number of predicted closed issues
+    predicted_max_day = np.argmax(forecast)
+
+    # Convert day index to day name
+    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    predicted_max_day_name = days_of_week[predicted_max_day]
+
+    return predicted_max_day_name
+
+@app.route('/api/statsmodel/issues/closed/month', methods=['GET'])
+def get_forecast_issues_closed_month_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    data = json.loads(response_API.text)
+    df_closed = pd.DataFrame(data[repo])
+
+    # Convert 'closed_at' to datetime and extract the month
+    df_closed['closed_at'] = pd.to_datetime(df_closed['closed_at'])
+    df_closed['month'] = df_closed['closed_at'].dt.month
+
+    # Aggregate data by month
+    monthly_issue_count = df_closed.groupby('month').size()
+
+    # Create and Fit the ARIMA Model
+    model = ARIMA(monthly_issue_count, order=(1, 0, 1))  # Adjust parameters as needed
+    model_fit = model.fit()
+
+    # Forecast the next few months
+    forecast = model_fit.forecast(steps=1)  # Forecasting next 3 months as an example
+
+    # Find the month with the maximum number of predicted closed issues
+    predicted_max_month = np.argmax(forecast) + 1  # Adding 1 as months are 1-indexed
+
+    return str(predicted_max_month)
+
+
+@app.route('/api/statsmodel/plot/issues/created', methods=['GET'])
+def get_forecast_plot_issues_created_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/open?repo=' + repo)
+    dataissues = json.loads(response_API.text)
+
+    df = pd.DataFrame(dataissues[repo])
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df.set_index('created_at', inplace=True)
+
+    # Resample and count issues per day
+    daily_issue_count = df.resample('D').size()
+
+    # Seasonal Decomposition
+    decomposition = seasonal_decompose(daily_issue_count, model='additive', period=7)
+
+    # Exponential Smoothing
+    model = ExponentialSmoothing(daily_issue_count, seasonal='add', seasonal_periods=7)
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(30)
+
+    # Plotting
+    future_dates = pd.date_range(start=daily_issue_count.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(15, 7))
+    plt.plot(daily_issue_count.index, daily_issue_count, label='Actual Issue Count')
+    plt.plot(future_dates, forecast, label='Forecasted Issue Count', color='orange')
+    plt.title('Forecast of Issue Creation using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Issues')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_issues_created_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/plot/issues/closed', methods=['GET'])
+def get_forecast_plot_issues_closed_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/issues/closed?repo=' + repo)
+    dataclosed = json.loads(response_API.text)
+
+    df = pd.DataFrame(dataclosed[repo])
+    df['closed_at'] = pd.to_datetime(df['closed_at'])
+    df.set_index('closed_at', inplace=True)
+
+    # Resample and count closed issues per day
+    daily_closed_count = df.resample('D').size()
+
+    # ARIMA Model
+    # Note: The order (p,d,q) should be determined based on your specific data
+    model = ARIMA(daily_closed_count, order=(5, 1, 0))
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(steps=30)
+
+    # Plotting
+    future_dates = pd.date_range(start=daily_closed_count.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(15, 7))
+    plt.plot(daily_closed_count.index, daily_closed_count, label='Actual Closed Issue Count')
+    plt.plot(future_dates, forecast, label='Forecasted Closed Issue Count', color='orange')
+    plt.title('Forecast of Issue Closure using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Closed Issues')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_issues_closed_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/plot/commits', methods=['GET'])
+def get_forecast_plot_commits_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/commits?repo=' + repo)
+    datacommit = json.loads(response_API.text)
+
+    df = pd.DataFrame()
+    for repo, commits in datacommit.items():
+        temp_df = pd.DataFrame(commits)
+        if 'date' in temp_df.columns:
+            temp_df['date'] = pd.to_datetime(temp_df['date'])
+            df = pd.concat([df, temp_df])
+        else:
+            print(f"'date' key not found in the commits for repository {repo}")
+
+    df = df.groupby('date')['sha'].count().reset_index(name='count')
+    df.set_index('date', inplace=True)
+    df = df.resample('D').asfreq().fillna(0)
+
+    # Simple Exponential Smoothing
+    model = SimpleExpSmoothing(df['count'])
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(30)
+
+    # Plotting
+    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(15, 7))
+    plt.plot(df.index, df['count'], label='Actual Commit Count')
+    plt.plot(future_dates, forecast, label='Forecasted Commit Count', color='orange')
+    plt.title('Forecast of Commit Activity using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Commits')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_commits_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/plot/pull', methods=['GET'])
+def get_forecast_plot_pull_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/pull?repo=' + repo)
+    datapull = json.loads(response_API.text)
+
+    df = pd.DataFrame(datapull[repo])
+    df['created_at'] = pd.to_datetime(df['created_at'])
+    df = df.groupby('created_at').count().reset_index()
+    df.set_index('created_at', inplace=True)
+    df = df.resample('D').asfreq().fillna(0)
+
+    # Simple Exponential Smoothing
+    model = SimpleExpSmoothing(df['pr_number'])
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(30)
+
+    # Plotting
+    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(15, 7))
+    plt.plot(df.index, df['pr_number'], label='Actual Pull Count')
+    plt.plot(future_dates, forecast, label='Forecasted Pull Count', color='orange')
+    plt.title('Forecast of Pull Activity using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Pulls')
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_pull_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/plot/contributor', methods=['GET'])
+def get_forecast_plot_contributor_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/contributors?repo=' + repo)
+    datacontributors = json.loads(response_API.text)
+
+    # Prepare data
+    dates = []
+    for repo, contributors in datacontributors.items():
+        for contributor in contributors:
+            dates.extend(contributor['dates'])
+
+    df = pd.DataFrame({'date': dates})
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.groupby('date').size().reset_index(name='contributions')
+    df.set_index('date', inplace=True)
+    df = df.asfreq('D').fillna(0)
+
+    # Exponential Smoothing Model
+    model = ExponentialSmoothing(df['contributions'], seasonal='add', seasonal_periods=7)
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(30)
+
+    # Plotting
+    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['contributions'], label='Actual Contributions')
+    plt.plot(future_dates, forecast, label='Forecasted Contributions', color='orange')
+    plt.title('Contributions Forecast Using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Contributions')
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_contributor_' + repo + '.png'
+    upload_blob_from_memory(buf, filename)
+    buf.close()
+
+    return bucketurl + filename
+
+
+@app.route('/api/statsmodel/plot/release', methods=['GET'])
+def get_forecast_plot_release_statsmodel():
+    repo = request.args.get('repo')
+    response_API = requests.get(appurl + '/api/date/release?repo=' + repo)
+    datarelease = json.loads(response_API.text)
+
+    # Prepare data
+    release_dates = [entry['release_date'] for entry in datarelease[repo]]
+    df = pd.DataFrame({'release_date': release_dates})
+    df['release_date'] = pd.to_datetime(df['release_date'])
+    df = df.groupby('release_date').size().reset_index(name='releases')
+    df.set_index('release_date', inplace=True)
+    df = df.asfreq('D').fillna(0)
+
+    # Exponential Smoothing Model
+    model = ExponentialSmoothing(df['releases'], seasonal='add', seasonal_periods=7)
+    model_fit = model.fit()
+
+    # Forecast next 30 days
+    forecast = model_fit.forecast(30)
+
+    # Plotting
+    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=30)
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['releases'], label='Actual Releases')
+    plt.plot(future_dates, forecast, label='Forecasted Releases', color='orange')
+    plt.title('Release Forecast Using Statsmodels')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Releases')
+    plt.legend()
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    filename = 'statsmodel_release_' + repo + '.png'
     upload_blob_from_memory(buf, filename)
     buf.close()
 
